@@ -433,15 +433,15 @@ function GlobalStyle() {
 const MODEL_OPTIONS = {
   gemini: [
     { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash-Lite (newest, fast + strong quality)" },
-    { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash (balanced speed & quality)" },
     { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash (best overall writing quality)" },
-    { id: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash-Lite (fastest, highest free-tier limits)" }
+    { id: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash-Lite (fastest, highest free-tier limits)" },
+    { id: "gemma-4-31b-it", label: "Gemma 4 31B (open-weight, strong reasoning, free)" }
   ],
   groq: [
-    { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (best all-around storytelling)" },
-    { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant (fastest, lighter scenes)" },
-    { id: "deepseek-r1-distill-llama-70b", label: "DeepSeek R1 Distill 70B (best at logic-heavy, twisty plots)" },
-    { id: "qwen/qwen3-32b", label: "Qwen3 32B (strong instruction-following & variety)" }
+    { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B (best all-around storytelling)" },
+    { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B (fastest, lighter scenes)" },
+    { id: "qwen/qwen3.6-27b", label: "Qwen3.6 27B (strong instruction-following & variety)" },
+    { id: "qwen/qwen3.8-27b", label: "Qwen3.8 27B (best at logic-heavy, twisty plots)" }
   ]
 };
 function ApiKeyModal({ onClose }) {
