@@ -21,9 +21,13 @@ const DEFAULT_MODELS = {
 // "summary" field alongside the narration, so this is a bit higher than
 // narration alone would need — kept modest for llama-3.1-8b-instant
 // specifically since its free tier has a very small total (input + output)
-// tokens-per-minute limit.
+// tokens-per-minute limit. Gemma 4 gets a much larger budget because its
+// "thinking" tokens are drawn from the same maxOutputTokens pool, so a low
+// budget can leave no room for the actual JSON answer and truncate it.
 const OUTPUT_TOKEN_BUDGETS = {
   "llama-3.1-8b-instant": 1200,
+  "gemma-4-31b-it": 4000,
+  "gemma-4-26b-a4b-it": 4000,
 };
 const DEFAULT_OUTPUT_TOKENS = 2000;
 
@@ -79,11 +83,15 @@ async function handleGemini({ messages, model, apiKey }) {
   }));
 
   const generationConfig = { maxOutputTokens: outputBudgetFor(model) };
-  // Note: Gemma 4 models think out loud in <thought>...</thought> tags
-  // before their actual answer, and there's no valid thinkingConfig value
+  // Gemma 4 models think out loud in <thought>...</thought> tags before
+  // their actual answer, consuming part of maxOutputTokens. There's no way
   // to fully disable this (thinkingLevel only accepts "MINIMAL" or "HIGH" —
-  // there is no "off"). Rather than fight that, we just strip any
-  // <thought> block out of the response text below before returning it.
+  // there is no "off"), so we ask for minimal thinking and give Gemma a
+  // larger token budget above, then strip any <thought> block from the
+  // response text below before returning it.
+  if (/^gemma-/.test(model)) {
+    generationConfig.thinkingConfig = { thinkingLevel: "MINIMAL" };
+  }
 
   let res;
   try {
@@ -124,10 +132,24 @@ async function handleGemini({ messages, model, apiKey }) {
   // before it reaches the frontend's JSON parser.
   text = text.replace(/<thought>[\s\S]*?<\/thought>/gi, "").trim();
 
+  const finishReason = candidate.finishReason;
+
   if (!text) {
-    const finishReason = candidate.finishReason;
     return jsonResponse(
       { error: { message: finishReason ? `Gemini returned no text (finish reason: ${finishReason}).` : "Gemini returned empty text." } },
+      502
+    );
+  }
+
+  if (finishReason === "MAX_TOKENS") {
+    return jsonResponse(
+      {
+        error: {
+          message: `Gemini's response was cut off before finishing (ran out of the ${outputBudgetFor(
+            model
+          )}-token budget, likely spent on reasoning). Try again, or raise OUTPUT_TOKEN_BUDGETS for this model.`,
+        },
+      },
       502
     );
   }
