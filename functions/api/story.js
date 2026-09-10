@@ -68,14 +68,20 @@ async function handleGemini({ messages, model, apiKey }) {
     );
   }
 
-  // Gemini has no separate "system" role in this simple form, and uses
-  // "model" instead of "assistant" for the AI's own turns. The first message
-  // here is Story Loom's big instruction/system prompt sent as a normal
-  // "user" turn, which Gemini handles fine as the first turn.
   const contents = messages.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: String(m.content ?? "") }],
   }));
+
+  const generationConfig = { maxOutputTokens: outputBudgetFor(model) };
+  // Gemma 4 models think out loud in <thought>...</thought> tags before
+  // their actual answer. That reasoning text can contain stray { } chars
+  // that break the frontend's naive JSON-brace extraction, so turn
+  // thinking off for Gemma models specifically. (Gemini models ignore
+  // thinkingConfig.thinkingLevel: "off" harmlessly if unsupported.)
+  if (/^gemma-/.test(model)) {
+    generationConfig.thinkingConfig = { thinkingLevel: "off" };
+  }
 
   let res;
   try {
@@ -84,7 +90,7 @@ async function handleGemini({ messages, model, apiKey }) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: outputBudgetFor(model) } }),
+        body: JSON.stringify({ contents, generationConfig }),
       }
     );
   } catch (networkErr) {
@@ -103,7 +109,6 @@ async function handleGemini({ messages, model, apiKey }) {
 
   const candidate = data.candidates?.[0];
   if (!candidate) {
-    // Often means the prompt or the response got blocked by Gemini's safety filters.
     const blockReason = data.promptFeedback?.blockReason;
     return jsonResponse(
       { error: { message: blockReason ? `Gemini blocked this request (${blockReason}).` : "Gemini returned no candidates." } },
@@ -111,7 +116,12 @@ async function handleGemini({ messages, model, apiKey }) {
     );
   }
 
-  const text = (candidate.content?.parts || []).map((p) => p.text || "").join("");
+  let text = (candidate.content?.parts || []).map((p) => p.text || "").join("");
+  // Defensive: strip any leaked <thought>...</thought> block (Gemma 4)
+  // before it reaches the frontend's JSON parser, even if thinkingConfig
+  // didn't fully suppress it.
+  text = text.replace(/<thought>[\s\S]*?<\/thought>/gi, "").trim();
+
   if (!text) {
     const finishReason = candidate.finishReason;
     return jsonResponse(
