@@ -3,7 +3,8 @@
 // This runs on Cloudflare's servers, never in the visitor's browser. It
 // supports two AI providers:
 //   - Gemini (Google) — site default, key comes from env.GEMINI_API_KEY
-//     unless the player supplies their own.
+//     unless the player supplies their own. Also handles Gemma models
+//     (e.g. gemma-4-31b-it), which are served through the same endpoint.
 //   - Groq — free-tier, OpenAI-compatible chat API. No site default key is
 //     required; players supply their own Groq key via the app's API key
 //     button (or set env.GROQ_API_KEY to give the whole site a default).
@@ -13,7 +14,7 @@
 
 const DEFAULT_MODELS = {
   gemini: "gemini-3.1-flash-lite",
-  groq: "llama-3.3-70b-versatile",
+  groq: "openai/gpt-oss-120b",
 };
 
 // Output token budget per model. The response now includes a short running
@@ -68,20 +69,21 @@ async function handleGemini({ messages, model, apiKey }) {
     );
   }
 
+  // Gemini has no separate "system" role in this simple form, and uses
+  // "model" instead of "assistant" for the AI's own turns. The first message
+  // here is Story Loom's big instruction/system prompt sent as a normal
+  // "user" turn, which Gemini (and Gemma) handles fine as the first turn.
   const contents = messages.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: String(m.content ?? "") }],
   }));
 
   const generationConfig = { maxOutputTokens: outputBudgetFor(model) };
-  // Gemma 4 models think out loud in <thought>...</thought> tags before
-  // their actual answer. That reasoning text can contain stray { } chars
-  // that break the frontend's naive JSON-brace extraction, so turn
-  // thinking off for Gemma models specifically. (Gemini models ignore
-  // thinkingConfig.thinkingLevel: "off" harmlessly if unsupported.)
-  if (/^gemma-/.test(model)) {
-    generationConfig.thinkingConfig = { thinkingLevel: "off" };
-  }
+  // Note: Gemma 4 models think out loud in <thought>...</thought> tags
+  // before their actual answer, and there's no valid thinkingConfig value
+  // to fully disable this (thinkingLevel only accepts "MINIMAL" or "HIGH" —
+  // there is no "off"). Rather than fight that, we just strip any
+  // <thought> block out of the response text below before returning it.
 
   let res;
   try {
@@ -109,6 +111,7 @@ async function handleGemini({ messages, model, apiKey }) {
 
   const candidate = data.candidates?.[0];
   if (!candidate) {
+    // Often means the prompt or the response got blocked by Gemini's safety filters.
     const blockReason = data.promptFeedback?.blockReason;
     return jsonResponse(
       { error: { message: blockReason ? `Gemini blocked this request (${blockReason}).` : "Gemini returned no candidates." } },
@@ -118,8 +121,7 @@ async function handleGemini({ messages, model, apiKey }) {
 
   let text = (candidate.content?.parts || []).map((p) => p.text || "").join("");
   // Defensive: strip any leaked <thought>...</thought> block (Gemma 4)
-  // before it reaches the frontend's JSON parser, even if thinkingConfig
-  // didn't fully suppress it.
+  // before it reaches the frontend's JSON parser.
   text = text.replace(/<thought>[\s\S]*?<\/thought>/gi, "").trim();
 
   if (!text) {
